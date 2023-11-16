@@ -1,181 +1,4 @@
-# MiDaSv3 Depth Estimation
-
-<!-- TOC -->
-
-- [MiDaSv3 Depth Estimation](#midasv3-depth-estimation)
-  - [From Center of Weight](#from-center-of-weight)
-    - [Setup](#setup)
-    - [Create Depth Map](#create-depth-map)
-    - [Get Depth of Center Point](#get-depth-of-center-point)
-  - [MiDaSv3 Depth Estimation for YOLOv8 Detected Objects](#midasv3-depth-estimation-for-yolov8-detected-objects)
-    - [Object Detection with YOLOv8](#object-detection-with-yolov8)
-      - [Draw Bounding Box](#draw-bounding-box)
-      - [Draw Center Point](#draw-center-point)
-    - [MiDaSv3 Depth Estimation](#midasv3-depth-estimation-1)
-    - [Get Depth Estimation for YOLO BBOX Center Point](#get-depth-estimation-for-yolo-bbox-center-point)
-
-<!-- /TOC -->
-
-```python
-import cv2 as cv
-from glob import glob
-import matplotlib.pyplot as plt
-import numpy as np
-from scipy.interpolate import RectBivariateSpline
-from scipy.ndimage import center_of_mass
-import torch
-```
-
-
-## From Center of Weight
-
-### Setup
-
-```python
-test_images = glob('assets/*.jpg')
-test_images
-```
-
-    ['assets/cyber.jpg']
-
-
-```python
-image = plt.imread(test_images[0])
-```
-
-
-```python
-# downloading the Midas model from TorchHub.
-#model_type = "DPT_Large"     # MiDaS v3 - Large (1.28GM) (highest accuracy, slowest inference speed)
-#model_type = "DPT_Hybrid"   # MiDaS v3 - Hybrid (470M) (medium accuracy, medium inference speed)
-model_type = "MiDaS_small"  # MiDaS v2.1 - Small (82M) (lowest accuracy, highest inference speed)
-
-midas = torch.hub.load("intel-isl/MiDaS", model_type, trust_repo=True)
-
-# use GPU if available
-device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
-midas.to(device)
-midas.eval()
-```
-
-
-```python
-# Use transforms to resize and normalize the image
-midas_transforms = torch.hub.load("intel-isl/MiDaS", "transforms")
-
-if model_type == "DPT_Large" or model_type == "DPT_Hybrid":
-    transform = midas_transforms.dpt_transform
-else:
-    transform = midas_transforms.small_transform
-```
-
-### Create Depth Map
-
-
-```python
-imgbatch = transform(image).to(device)
-
-# Making a prediction
-with torch.no_grad():
-    prediction = midas(imgbatch)
-    prediction = torch.nn.functional.interpolate(
-        prediction.unsqueeze(1),
-        size=image.shape[:2],
-        mode='bicubic',
-        align_corners=False
-    ).squeeze()
-
-output = prediction.cpu().numpy()
-
-# normalizing the output predictions for cv2 to read.
-output_norm = cv.normalize(output, None, 0, 1, norm_type=cv.NORM_MINMAX, dtype=cv.CV_32F)
-
-# colored depth map
-output_norm_c = (output_norm*255).astype(np.uint8)
-output_norm_c = cv.applyColorMap(output_norm_c, cv.COLORMAP_MAGMA)
-```
-
-
-```python
-plt.imshow(output_norm_c, cmap=plt.cm.binary)
-plt.axis(False)
-plt.title('Depth Map')
-```
-
-    
-![MiDaSv3 Depth Estimation](assets/output_9_1.webp)
-    
-
-
-
-```python
-print('Max depth: ', output_norm.max(), ', Min depth: ', output_norm.min(), ', Mean depth: ', output_norm.mean())
-```
-
-    Max depth:  0.99999994 , Min depth:  -1.1621175e-09 , Mean depth:  0.6086985
-
-
-### Get Depth of Center Point
-
-
-```python
-center_y, center_x = center_of_mass(output_norm)
-center_y, center_x
-```
-
-
-
-
-    (725.2488075505419, 655.4564076983983)
-
-
-
-
-```python
-# arrays from normed depth map
-h , w = output_norm.shape
-x_grid = np.arange(w)
-y_grid = np.arange(h)
-```
-
-
-```python
-# create a spline object using the output_norm arrays
-spline = RectBivariateSpline(y_grid, x_grid, output_norm)
-```
-
-
-```python
-#Define depth to distance
-def depth_to_distance(depth_value,depth_scale):
-    return 1.0 / (depth_value*depth_scale)
-```
-
-
-```python
-#Passing the x and y co-ordinates distance function to calculate distance.
-#Tweak with the depth scale to see what suits you!
-depth_scale = 1
-depth_mid_filt = spline(center_x, center_y)
-depth_midas = depth_to_distance(depth_mid_filt, depth_scale)
-```
-
-
-```python
-cv.putText(image, 'Center Depth: ' + str(np.format_float_positional(depth_mid_filt, precision=2)),(10,20),cv.FONT_HERSHEY_SIMPLEX,1,(128,0,128),4)
-cv.circle(image,(int(center_x), int(center_y)), 40, (128,0,128), 20)
-plt.imshow(image, cmap=plt.cm.binary)
-plt.axis(False)
-```
-
-    
-![MiDaSv3 Depth Estimation](assets/output_17_1.webp)
-
-
-
-
-
-## MiDaSv3 Depth Estimation for YOLOv8 Detected Objects
+# MiDaSv3 Depth Estimation for YOLOv8 Detected Objects
 
 
 ```python
@@ -193,7 +16,7 @@ import torch
 from ultralytics import YOLO
 ```
 
-### Object Detection with YOLOv8
+## Object Detection with YOLOv8
 
 
 ```python
@@ -210,6 +33,19 @@ model = YOLO("yolov8n.pt")  # load a pre-trained model
 images = glob("./assets/*.jpg")
 images
 ```
+
+
+
+
+    ['./assets/cyber.jpg',
+     './assets/thrones_01.jpg',
+     './assets/thrones_02.jpg',
+     './assets/thrones_03.jpg',
+     './assets/thrones_04.jpg',
+     './assets/thrones_05.jpg',
+     './assets/thrones_06.jpg']
+
+
 
 
 ```python
@@ -235,8 +71,16 @@ plt.imshow(composed_rgb)
 # plt.axis('off')
 ```
 
+
+
+
+    <matplotlib.image.AxesImage at 0x7ff38aa53bb0>
+
+
+
+
     
-![MiDaSv3 Depth Estimation for YOLOv8 Detected Objects](assets/output_8_1.webp)
+![png](output_8_1.png)
     
 
 
@@ -263,11 +107,11 @@ for image_path in pred_images:
 
 
     
-![MiDaSv3 Depth Estimation for YOLOv8 Detected Objects](assets/output_10_0.webp)
+![png](output_10_0.png)
     
 
 
-#### Draw Bounding Box
+### Draw Bounding Box
 
 
 ```python
@@ -329,12 +173,20 @@ result_image = cv.rectangle(test_image, (x1,y1), (x2,y2), (255,0,255), 7)
 plt.imshow(result_image)  
 ```
 
+
+
+
+    <matplotlib.image.AxesImage at 0x7ff38a95dd50>
+
+
+
+
     
-![MiDaSv3 Depth Estimation for YOLOv8 Detected Objects](assets/output_16_1.webp)
+![png](output_16_1.png)
     
 
 
-#### Draw Center Point
+### Draw Center Point
 
 
 ```python
@@ -349,12 +201,21 @@ result_image = cv.circle(test_image, (int(x_center), int(y_center)), 20, (255,0,
 # displaying the image  
 plt.imshow(result_image)  
 ```
+
+
+
+
+    <matplotlib.image.AxesImage at 0x7ff38a9cab60>
+
+
+
+
     
-![MiDaSv3 Depth Estimation for YOLOv8 Detected Objects](assets/output_19_1.webp)
+![png](output_19_1.png)
     
 
 
-### MiDaSv3 Depth Estimation
+## MiDaSv3 Depth Estimation
 
 
 ```python
@@ -381,6 +242,9 @@ if model_type == "DPT_Large" or model_type == "DPT_Hybrid":
 else:
     transform = midas_transforms.small_transform
 ```
+
+    Using cache found in /root/.cache/torch/hub/intel-isl_MiDaS_master
+
 
 
 ```python
@@ -413,8 +277,16 @@ plt.imshow(output_norm_c, cmap=plt.cm.binary)
 plt.title('Depth Map')
 ```
 
+
+
+
+    Text(0.5, 1.0, 'Depth Map')
+
+
+
+
     
-![MiDaSv3 Depth Estimation for YOLOv8 Detected Objects](assets/output_24_1.webp)
+![png](output_24_1.png)
     
 
 
@@ -446,11 +318,11 @@ for image_path in depth_images:
 
 
     
-![MiDaSv3 Depth Estimation for YOLOv8 Detected Objects](assets/output_26_0.webp)
+![png](output_26_0.png)
     
 
 
-### Get Depth Estimation for YOLO BBOX Center Point
+## Get Depth Estimation for YOLO BBOX Center Point
 
 
 ```python
@@ -491,8 +363,15 @@ plt.axis(False)
 ```
 
 
+
+
+    (-0.5, 848.5, 1274.5, -0.5)
+
+
+
+
     
-![MiDaSv3 Depth Estimation for YOLOv8 Detected Objects](assets/output_32_1.webp)
+![png](output_32_1.png)
     
 
 
@@ -522,4 +401,11 @@ for image_path in result_images:
 
 
     
-![MiDaSv3 Depth Estimation for YOLOv8 Detected Objects](assets/output_34_0.webp)
+![png](output_34_0.png)
+    
+
+
+
+```python
+
+```
